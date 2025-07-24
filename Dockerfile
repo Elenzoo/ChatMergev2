@@ -1,6 +1,5 @@
 FROM node:18-slim
 
-# Instalujemy zależności systemowe potrzebne do Puppeteera
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     fonts-liberation \
@@ -11,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdbus-1-3 \
     libgdk-pixbuf2.0-0 \
-    libnsso3 \
+    libnss3 \
     libx11-xcb1 \
     libxcomposite1 \
     libxdamage1 \
@@ -23,14 +22,7 @@ RUN apt-get update && apt-get install -y \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Ustawiamy katalog roboczy
 WORKDIR /app
-
-# Kopiujemy pliki
 COPY . .
-
-# Instalujemy zależności node.js
 RUN npm install
-
-# Uruchamiamy aplikację
 CMD ["node", "server.js"]
