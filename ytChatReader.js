@@ -45,10 +45,20 @@ async function startYouTubeChat(videoId) {
   if (!exePath) return;
 
   const browser = await puppeteer.launch({
-    executablePath: exePath,
-    args: ["--no-sandbox"],
-    headless: true
-  });
+  executablePath: exePath,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-accelerated-2d-canvas',
+    '--disable-gpu',
+    '--no-zygote',
+    '--single-process',
+    '--disable-extensions'
+  ],
+  headless: "new"
+});
+
 
   const page = await browser.newPage();
   await page.goto(`https://www.youtube.com/watch?v=${videoId}`, {
