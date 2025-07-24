@@ -1,61 +1,84 @@
-const puppeteer = require("puppeteer-core");
 const fs = require("fs");
+const axios = require("axios");
+const puppeteer = require("puppeteer-core");
 const glob = require("glob");
 
-const YOUTUBE_URL = "https://www.youtube.com/@kajma/live";
+const CHANNEL_URL = "https://www.youtube.com/@izaklive/live";
 
 function findExecutablePath() {
   const paths = [
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
     "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/opt/render/.cache/puppeteer/chrome/linux-*/chrome"
+    "/usr/bin/chromium-browser"
   ];
+
   for (const path of paths) {
-    const match = glob.sync(path)[0];
-    if (match && fs.existsSync(match)) {
-      console.log("✅ Wykryto przeglądarkę:", match);
-      return match;
+    if (fs.existsSync(path)) {
+      console.log("✅ Wykryto przeglądarkę:", path);
+      return path;
     }
   }
-  console.warn("❌ Nie znaleziono przeglądarki");
+
+  console.error("❌ Nie znaleziono przeglądarki w systemie.");
   return null;
 }
 
-async function getYouTubeChatMessages() {
-  const executablePath = findExecutablePath();
-  if (!executablePath) throw new Error("Brak przeglądarki");
+async function getLiveVideoId() {
+  try {
+    const html = await axios.get(CHANNEL_URL).then(res => res.data);
+    const match = html.match(/"videoId":"(.*?)"/);
+    if (match) {
+      const videoId = match[1];
+      console.log("🎯 ID streama:", videoId);
+      return videoId;
+    }
+  } catch (err) {
+    console.error("❌ Błąd scrapera:", err.message);
+  }
+
+  return null;
+}
+
+async function startYouTubeChat(videoId) {
+  const exePath = findExecutablePath();
+  if (!exePath) return;
 
   const browser = await puppeteer.launch({
-    headless: true,
-    executablePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    executablePath: exePath,
+    args: ["--no-sandbox"],
+    headless: true
   });
 
   const page = await browser.newPage();
-  await page.goto(YOUTUBE_URL, { waitUntil: "domcontentloaded" });
-
-  const frame = page.frames().find(f => f.url().includes("youtube.com/live_chat"));
-
-  if (!frame) {
-    await browser.close();
-    throw new Error("❌ Nie znaleziono iframe czatu.");
-  }
-
-  const messages = await frame.evaluate(() => {
-    const nodes = Array.from(document.querySelectorAll("#items yt-live-chat-text-message-renderer"));
-    return nodes.map(el => {
-      const name = el.querySelector("#author-name")?.innerText || "???";
-      const msg = el.querySelector("#message")?.innerText || "";
-      return `${name}: ${msg}`;
-    });
+  await page.goto(`https://www.youtube.com/watch?v=${videoId}`, {
+    waitUntil: "domcontentloaded"
   });
 
-  await browser.close();
-  return messages;
+  await page.exposeFunction("emitChat", (text) => {
+    console.log("▶️", text);
+  });
+
+  await page.evaluate(() => {
+    const observer = new MutationObserver(() => {
+      const messages = document.querySelectorAll("#item-offset > yt-live-chat-text-message-renderer");
+      messages.forEach(msg => {
+        const name = msg.querySelector("#author-name")?.innerText;
+        const content = msg.querySelector("#message")?.innerText;
+        if (name && content) {
+          window.emitChat(`${name}: ${content}`);
+        }
+      });
+    });
+
+    const container = document.querySelector("#item-offset");
+    if (container) {
+      observer.observe(container, { childList: true, subtree: true });
+    }
+  });
 }
 
 module.exports = {
-  getYouTubeChatMessages
+  getLiveVideoId,
+  startYouTubeChat
 };
