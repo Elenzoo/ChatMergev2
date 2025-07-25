@@ -10,7 +10,16 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("✅ ChatMerge Puppeteer działa – nasłuch czatu YouTube w konsoli.");
+  res.send("✅ ChatMerge Puppeteer działa – nasłuch czatu YouTube i przesyłanie do frontendu działa.");
+});
+
+io.on("connection", (socket) => {
+  console.log("🔌 Nowe połączenie Socket.IO z frontendem.");
+
+  // (Opcjonalnie, jeśli kiedyś frontend wysyła też wiadomości)
+  socket.on("chatMessage", (msg) => {
+    console.log("📩 Odebrano wiadomość od klienta:", msg);
+  });
 });
 
 server.listen(PORT, async () => {
