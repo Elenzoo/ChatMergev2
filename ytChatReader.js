@@ -38,25 +38,33 @@ async function getLiveVideoId() {
   const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
-  // Obsługa zgody na cookies
+  // Obsługa ekranu zgody cookies
   if (redirectedUrl.includes("consent.youtube.com")) {
     console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
 
     try {
+      await page.waitForTimeout(1000); // Na wszelki wypadek
+
+      // Debug: pokaż fragment HTML
+      const html = await page.content();
+      console.log("🔍 [DEBUG] Fragment strony (pierwsze 500 znaków):", html.slice(0, 500));
+
+      // XPath klikający "Accept all" (niezależnie od wersji językowej)
       const [acceptBtn] = await page.$x(
-        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept all')]"
+        `//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept all')]`
       );
 
       if (acceptBtn) {
         console.log("🖱️ [SCRAPER] Klikam w przycisk 'Accept all'...");
         await acceptBtn.click();
         await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
-        console.log("✅ [SCRAPER] Kliknięcie powiodło się.");
+        console.log("✅ [SCRAPER] Kliknięcie powiodło się. Obecny URL:", page.url());
       } else {
         console.warn("⚠️ [SCRAPER] Nie znaleziono przycisku 'Accept all'.");
         await browser.close();
         return null;
       }
+
     } catch (e) {
       console.error("❌ [SCRAPER] Błąd przy klikaniu w ekran zgody:", e.message);
       await browser.close();
@@ -65,7 +73,7 @@ async function getLiveVideoId() {
   }
 
   const finalUrl = page.url();
-  console.log("🎯 [SCRAPER] Finalny URL po przekierowaniach:", finalUrl);
+  console.log("🎯 [SCRAPER] Finalny URL:", finalUrl);
 
   const match = finalUrl.match(/v=([\w-]{11})/);
   if (match && match[1]) {
@@ -75,7 +83,7 @@ async function getLiveVideoId() {
     return videoId;
   }
 
-  console.warn("⚠️ [SCRAPER] Nie znaleziono videoId w przekierowanym URL.");
+  console.warn("⚠️ [SCRAPER] Nie znaleziono videoId w URL.");
   await browser.close();
   return null;
 }
