@@ -27,7 +27,7 @@ async function getLiveVideoId() {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: "new"
   });
 
@@ -38,25 +38,31 @@ async function getLiveVideoId() {
   const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
-  // Obsługa ekranu zgody
+  // Obsługa ekranu zgody (consent.youtube.com)
   if (redirectedUrl.includes("consent.youtube.com")) {
     console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
 
     try {
-      await Promise.race([
-        page.waitForSelector('form[action*="consent"] button[type="submit"]', { timeout: 5000 }),
-        page.waitForSelector('button[aria-label="Accept all"]', { timeout: 5000 }),
-        page.waitForSelector('#introAgreeButton', { timeout: 5000 })
-      ]);
+      await page.waitForSelector('button[aria-label="Accept all"], button:has-text("Accept all")', { timeout: 7000 });
 
-      const buttons = await page.$$('form[action*="consent"] button[type="submit"], button[aria-label="Accept all"], #introAgreeButton');
-      if (buttons.length > 0) {
-        console.log("🖱️ [SCRAPER] Klikam w przycisk zgody...");
-        await buttons[0].click();
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+      const [acceptBtn] = await page.$x("//button[contains(text(), 'Accept all')]");
+      if (acceptBtn) {
+        console.log("🖱️ [SCRAPER] Klikam w przycisk 'Accept all' przez XPath...");
+        await acceptBtn.click();
       } else {
-        console.warn("⚠️ [SCRAPER] Nie znaleziono żadnego przycisku zgody.");
+        const fallback = await page.$('button[aria-label="Accept all"]');
+        if (fallback) {
+          console.log("🖱️ [SCRAPER] Klikam w przycisk 'Accept all' przez aria-label...");
+          await fallback.click();
+        } else {
+          console.warn("⚠️ [SCRAPER] Nie znaleziono przycisku 'Accept all'.");
+          await browser.close();
+          return null;
+        }
       }
+
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+      console.log("✅ [SCRAPER] Ekran zgody zaakceptowany.");
     } catch (e) {
       console.error("❌ [SCRAPER] Błąd przy klikaniu w ekran zgody:", e.message);
       await browser.close();
@@ -86,7 +92,7 @@ async function startYouTubeChat(videoId, io) {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: "new"
   });
 
