@@ -27,7 +27,7 @@ async function getLiveVideoId() {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
     headless: true,
     timeout: 30000
   });
@@ -61,9 +61,15 @@ async function getLiveVideoId() {
     }
   }
 
-  // 🔄 Wracamy na oryginalny URL po akceptacji cookies
-  console.log("🔁 [SCRAPER] Nowy URL po akceptacji: " + CHANNEL_URL);
-  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
+  // 🔁 ponownie otwieramy oryginalny link, już bez ekranu zgody
+  console.log("🔁 [SCRAPER] Nowy URL po akceptacji: ", CHANNEL_URL);
+  try {
+    await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+  } catch (e) {
+    console.error("⛔ [SCRAPER] Timeout przy ponownym otwieraniu streama:", e.message);
+    await browser.close();
+    return null;
+  }
 
   const finalUrl = page.url();
   console.log("🎯 [SCRAPER] Finalny URL:", finalUrl);
@@ -87,7 +93,7 @@ async function startYouTubeChat(videoId, io) {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
     headless: true,
     timeout: 30000
   });
