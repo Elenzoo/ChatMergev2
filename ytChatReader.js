@@ -1,7 +1,7 @@
 const puppeteer = require("puppeteer-core");
 const fs = require("fs");
 
-const CHANNEL_URL = "https://www.youtube.com/@izaklive/live";
+const CHANNEL_URL = "https://www.youtube.com/@noobsapiens/live";
 
 function findExecutablePath() {
   const paths = [
@@ -78,19 +78,15 @@ async function startYouTubeChat(io) {
     return;
   }
 
-  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
-  if (!chatFrame) {
-    console.error("❌ [BOT] Nie znaleziono iframe czatu.");
-    await browser.close();
-    return;
-  }
-
   console.log("✅ [BOT] Połączono z iframe czatu. Start nasłuchu...");
 
   const knownMessages = new Set();
 
   setInterval(async () => {
     try {
+      const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
+      if (!chatFrame) throw new Error("Iframe czatu odłączony.");
+
       const messages = await chatFrame.evaluate(() => {
         const rendered = document.querySelectorAll("yt-live-chat-text-message-renderer");
         return Array.from(rendered).map(msg => {
