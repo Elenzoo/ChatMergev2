@@ -1,124 +1,74 @@
-// ytChatReader.js
-const puppeteer = require("puppeteer-core");
-const fs = require("fs");
+const axios = require("axios");
 
-const CHANNEL_URL = "https://www.youtube.com/@noobsapiens/live";
+const API_KEY = "AIzaSyCOR5QRFiHR-hZln9Zb2pHfOnyCANK0Yaw"; // Twój klucz API
+const CHANNEL_USERNAME = "noobsapiens";
+let nextPageToken = null;
 
-function findExecutablePath() {
-  const paths = [
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser"
-  ];
-  for (const path of paths) {
-    if (fs.existsSync(path)) {
-      console.log("✅ [BROWSER] Wykryto przeglądarkę:", path);
-      return path;
-    }
+async function getLiveVideoId() {
+  try {
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=UCg_3jZh2zMIcBzU0oN83V0w&type=video&eventType=live&key=${API_KEY}`;
+    const res = await axios.get(url);
+    const video = res.data.items[0];
+    return video ? video.id.videoId : null;
+  } catch (err) {
+    console.error("❌ [API] Błąd pobierania videoId:", err.message);
+    return null;
   }
-  console.error("❌ [BROWSER] Nie znaleziono przeglądarki.");
-  return null;
+}
+
+async function getLiveChatId(videoId) {
+  try {
+    const res = await axios.get(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${API_KEY}`);
+    return res.data.items[0]?.liveStreamingDetails?.activeLiveChatId || null;
+  } catch (err) {
+    console.error("❌ [API] Błąd pobierania liveChatId:", err.message);
+    return null;
+  }
+}
+
+async function pollChat(chatId, io) {
+  try {
+    const res = await axios.get("https://www.googleapis.com/youtube/v3/liveChat/messages", {
+      params: {
+        liveChatId: chatId,
+        part: "snippet,authorDetails",
+        key: API_KEY,
+        pageToken: nextPageToken
+      }
+    });
+
+    nextPageToken = res.data.nextPageToken;
+
+    res.data.items.forEach(msg => {
+      const author = msg.authorDetails.displayName;
+      const text = msg.snippet.displayMessage;
+      const formatted = `${author}: ${text}`;
+      console.log("💬 [YT Chat]", formatted);
+      io.emit("chatMessage", {
+        source: "YouTube",
+        text: formatted,
+        timestamp: Date.now()
+      });
+    });
+
+    const delay = res.data.pollingIntervalMillis || 5000;
+    setTimeout(() => pollChat(chatId, io), delay);
+
+  } catch (err) {
+    console.error("❌ [API] Błąd odczytu wiadomości:", err.message);
+    setTimeout(() => pollChat(chatId, io), 10000);
+  }
 }
 
 async function startYouTubeChat(io) {
-  const exePath = findExecutablePath();
-  if (!exePath) return;
+  const videoId = await getLiveVideoId();
+  if (!videoId) return console.error("❌ Brak aktywnego streama.");
 
-  const browser = await puppeteer.launch({
-    executablePath: exePath,
-    args: ["--no-sandbox","--disable-setuid-sandbox"],
-    headless: true,
-    timeout: 60000
-  });
-  const page = await browser.newPage();
-  page.setDefaultNavigationTimeout(60000);
+  const chatId = await getLiveChatId(videoId);
+  if (!chatId) return console.error("❌ Brak aktywnego liveChatId.");
 
-  console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
-  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
-  console.log("🔁 [SCRAPER] Redirect URL:", page.url());
-
-  // Retry akceptacji cookies
-  for (let i = 1; i <= 3; i++) {
-    if (page.url().includes("consent.youtube.com")) {
-      console.warn(`⚠️ [SCRAPER] Próba ${i}: ekran cookies`);
-      try {
-        await page.evaluate(() => {
-          const btn = Array.from(document.querySelectorAll("button")).find(el =>
-            /accept/i.test(el.textContent)
-          );
-          if (btn) btn.click();
-        });
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 });
-        console.log("✅ [SCRAPER] Cookies zaakceptowane");
-        break;
-      } catch (e) {
-        console.error(`❌ [SCRAPER] Błąd akceptacji (próba ${i}):`, e.message);
-        if (i === 3) {
-          await browser.close();
-          return;
-        }
-      }
-    }
-  }
-
-  const cookies = await page.cookies();
-  fs.writeFileSync("./cookies.json", JSON.stringify(cookies, null, 2));
-  console.log("🍪 [SCRAPER] Zapisano cookies.");
-
-  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
-  console.log("🎯 [SCRAPER] Finalny URL:", page.url());
-
-  // Retry na iframe czatu
-  let iframeLoaded = false;
-  for (let i = 1; i <= 3; i++) {
-    try {
-      console.log(`🤖 [BOT] Próba ${i}: czekam na iframe czatu`);
-      await page.waitForSelector("iframe#chatframe", { timeout: 20000 });
-      iframeLoaded = true;
-      break;
-    } catch (e) {
-      console.error(`❌ [BOT] Iframe chatframe nie załadował się (próba ${i}):`, e.message);
-      if (i === 3) {
-        await browser.close();
-        return;
-      }
-    }
-  }
-  if (!iframeLoaded) return;
-
-  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
-  if (!chatFrame) {
-    console.error("❌ [BOT] Nie znaleziono live_chat frame");
-    await browser.close();
-    return;
-  }
-  console.log("✅ [BOT] Połączono z iframe czatu. Start nasłuchiwania.");
-
-  const known = new Set();
-  setInterval(async () => {
-    try {
-      const messages = await chatFrame.evaluate(() => {
-        const nodes = document.querySelectorAll("yt-live-chat-text-message-renderer");
-        return Array.from(nodes).map(n => {
-          const author = n.querySelector("#author-name")?.innerText || "";
-          const text = n.querySelector("#message")?.innerText || "";
-          const id = n.getAttribute("id") || author + "-" + text;
-          return { id, author, text };
-        });
-      });
-      messages.forEach(m => {
-        if (!known.has(m.id)) {
-          known.add(m.id);
-          const formatted = `${m.author}: ${m.text}`;
-          console.log("💬 [YT Chat]", formatted);
-          io.emit("chatMessage", { source: "YouTube", text: formatted, timestamp: Date.now() });
-        }
-      });
-    } catch (err) {
-      console.error("❌ [LOOP] Błąd odczytu czatu:", err.message);
-    }
-  }, 2000);
+  console.log("✅ [BOT] Rozpoczynam nasłuch czatu...");
+  pollChat(chatId, io);
 }
 
 module.exports = { startYouTubeChat };
