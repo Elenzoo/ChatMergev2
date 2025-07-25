@@ -27,14 +27,13 @@ async function getLiveVideoId() {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: true,
     timeout: 30000
   });
 
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
-
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
@@ -50,8 +49,7 @@ async function getLiveVideoId() {
           if (btn) btn.click();
         });
         await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
-        redirectedUrl = page.url();
-        console.log("🔁 [SCRAPER] Nowy URL po akceptacji:", redirectedUrl);
+        console.log("✅ [SCRAPER] Zgoda zaakceptowana");
         break;
       } catch (e) {
         console.error(`❌ [SCRAPER] Błąd przy klikaniu ekran zgody (próba ${i}): ${e.message}`);
@@ -63,29 +61,19 @@ async function getLiveVideoId() {
     }
   }
 
-  console.log("🎯 [SCRAPER] Finalny URL:", redirectedUrl);
+  // 🔄 Wracamy na oryginalny URL po akceptacji cookies
+  console.log("🔁 [SCRAPER] Nowy URL po akceptacji: " + CHANNEL_URL);
+  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  // 1. Spróbuj wyciągnąć videoId z URL-a
-  const urlMatch = redirectedUrl.match(/v=([\w-]{11})/);
-  if (urlMatch && urlMatch[1]) {
-    const videoId = urlMatch[1];
-    console.log("🏆 [SCRAPER] Wykryto videoId z URL:", videoId);
+  const finalUrl = page.url();
+  console.log("🎯 [SCRAPER] Finalny URL:", finalUrl);
+
+  const match = finalUrl.match(/v=([\w-]{11})/);
+  if (match && match[1]) {
+    const videoId = match[1];
+    console.log("🏆 [SCRAPER] Wykryto aktywny stream z ID:", videoId);
     await browser.close();
     return videoId;
-  }
-
-  // 2. Awaryjnie sprawdź <link rel="canonical">
-  try {
-    const canonicalHref = await page.$eval("link[rel='canonical']", el => el.href);
-    const canonicalMatch = canonicalHref.match(/v=([\w-]{11})/);
-    if (canonicalMatch && canonicalMatch[1]) {
-      const videoId = canonicalMatch[1];
-      console.log("🏆 [SCRAPER] Wykryto videoId z canonical link:", videoId);
-      await browser.close();
-      return videoId;
-    }
-  } catch (e) {
-    console.warn("⚠️ [SCRAPER] Nie udało się pobrać <link rel='canonical'>:", e.message);
   }
 
   console.warn("⚠️ [SCRAPER] Nie znaleziono videoId.");
@@ -99,7 +87,7 @@ async function startYouTubeChat(videoId, io) {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: true,
     timeout: 30000
   });
@@ -107,7 +95,6 @@ async function startYouTubeChat(videoId, io) {
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
   const streamUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
   console.log("🌐 [BOT] Otwieram stronę streama:", streamUrl);
   await page.goto(streamUrl, { waitUntil: "domcontentloaded" });
 
