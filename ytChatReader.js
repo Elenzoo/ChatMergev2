@@ -43,11 +43,20 @@ async function getLiveVideoId() {
     console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
 
     try {
-      await page.waitForSelector('form[action*="consent"] button[type="submit"]', { timeout: 5000 });
-      await page.click('form[action*="consent"] button[type="submit"]');
-      console.log("✅ [SCRAPER] Kliknięto 'Zgadzam się', czekam na przekierowanie...");
+      await Promise.race([
+        page.waitForSelector('form[action*="consent"] button[type="submit"]', { timeout: 5000 }),
+        page.waitForSelector('button[aria-label="Zgadzam się"]', { timeout: 5000 }),
+        page.waitForSelector('#introAgreeButton', { timeout: 5000 }) // stary typ
+      ]);
 
-      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+      const buttons = await page.$$('form[action*="consent"] button[type="submit"], button[aria-label="Zgadzam się"], #introAgreeButton');
+      if (buttons.length > 0) {
+        console.log("🖱️ [SCRAPER] Klikam w przycisk zgody...");
+        await buttons[0].click();
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+      } else {
+        console.warn("⚠️ [SCRAPER] Nie znaleziono żadnego przycisku zgody.");
+      }
     } catch (e) {
       console.error("❌ [SCRAPER] Błąd przy klikaniu w ekran zgody:", e.message);
       await browser.close();
