@@ -38,31 +38,25 @@ async function getLiveVideoId() {
   const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
-  // Obsługa ekranu zgody (consent.youtube.com)
+  // Obsługa zgody na cookies
   if (redirectedUrl.includes("consent.youtube.com")) {
     console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
 
     try {
-      await page.waitForSelector('button[aria-label="Accept all"], button:has-text("Accept all")', { timeout: 7000 });
+      const [acceptBtn] = await page.$x(
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept all')]"
+      );
 
-      const [acceptBtn] = await page.$x("//button[contains(text(), 'Accept all')]");
       if (acceptBtn) {
-        console.log("🖱️ [SCRAPER] Klikam w przycisk 'Accept all' przez XPath...");
+        console.log("🖱️ [SCRAPER] Klikam w przycisk 'Accept all'...");
         await acceptBtn.click();
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+        console.log("✅ [SCRAPER] Kliknięcie powiodło się.");
       } else {
-        const fallback = await page.$('button[aria-label="Accept all"]');
-        if (fallback) {
-          console.log("🖱️ [SCRAPER] Klikam w przycisk 'Accept all' przez aria-label...");
-          await fallback.click();
-        } else {
-          console.warn("⚠️ [SCRAPER] Nie znaleziono przycisku 'Accept all'.");
-          await browser.close();
-          return null;
-        }
+        console.warn("⚠️ [SCRAPER] Nie znaleziono przycisku 'Accept all'.");
+        await browser.close();
+        return null;
       }
-
-      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
-      console.log("✅ [SCRAPER] Ekran zgody zaakceptowany.");
     } catch (e) {
       console.error("❌ [SCRAPER] Błąd przy klikaniu w ekran zgody:", e.message);
       await browser.close();
