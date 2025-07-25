@@ -85,26 +85,36 @@ async function startYouTubeChat(io) {
     return;
   }
 
-  console.log("✅ [BOT] Połączono z iframe czatu. Start loopa...");
+  console.log("✅ [BOT] Połączono z iframe czatu. Czekam na kontener czatu...");
+
+  try {
+    await chatFrame.waitForSelector("#item-offset", { timeout: 10000 });
+    console.log("📥 [CHAT] Kontener czatu załadowany.");
+  } catch (e) {
+    console.error("❌ [CHAT] Nie znaleziono kontenera wiadomości:", e.message);
+    await browser.close();
+    return;
+  }
 
   const knownMessages = new Set();
 
   setInterval(async () => {
     try {
       const messages = await chatFrame.evaluate(() => {
-        const rendered = document.querySelectorAll("yt-live-chat-text-message-renderer");
-        return Array.from(rendered).map(msg => {
-          const author = msg.querySelector("#author-name")?.innerText || "";
-          const text = msg.querySelector("#message")?.innerText || "";
-          const id = msg.getAttribute("id") || Math.random().toString(36).substring(7);
-          return { id, author, text };
-        });
+        return Array.from(document.querySelectorAll("yt-live-chat-text-message-renderer"))
+          .map(el => {
+            const id = el.getAttribute("id") || Math.random().toString(36).substring(2, 10);
+            const author = el.querySelector("#author-name")?.innerText?.trim() || "";
+            const message = el.querySelector("#message")?.innerText?.trim() || "";
+            return { id, author, message };
+          })
+          .filter(m => m.author && m.message);
       });
 
       messages.forEach(msg => {
         if (!knownMessages.has(msg.id)) {
           knownMessages.add(msg.id);
-          const formatted = `${msg.author}: ${msg.text}`;
+          const formatted = `${msg.author}: ${msg.message}`;
           console.log("💬 [YT Chat]", formatted);
           if (io) {
             io.emit("chatMessage", {
@@ -119,8 +129,7 @@ async function startYouTubeChat(io) {
     } catch (err) {
       console.error("❌ [LOOP] Błąd czytania wiadomości:", err.message);
     }
-  }, 2000); // co 2 sekundy
-
+  }, 2000);
 }
 
 module.exports = { startYouTubeChat };
