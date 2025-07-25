@@ -1,7 +1,8 @@
-const fs = require("fs");
 const puppeteer = require("puppeteer-core");
+const fs = require("fs");
 
-const CHANNEL_HANDLE = "zeprezz"; // ← zmień na "kajma", "izaklive" itp. gdy potrzeba
+const CHANNEL_HANDLE = "@zeprezz";
+const CHANNEL_URL = `https://www.youtube.com/${CHANNEL_HANDLE}/live`;
 
 function findExecutablePath() {
   const paths = [
@@ -16,7 +17,7 @@ function findExecutablePath() {
       return path;
     }
   }
-  console.error("❌ [BROWSER] Nie znaleziono przeglądarki.");
+  console.error("❌ [BROWSER] Nie znaleziono przeglądarki w systemie.");
   return null;
 }
 
@@ -31,71 +32,78 @@ async function getLiveVideoId() {
   });
 
   const page = await browser.newPage();
-  const channelLiveUrl = `https://www.youtube.com/@${CHANNEL_HANDLE}/live`;
+  console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
+  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  console.log("🌐 [SCRAPER] Otwieram URL:", channelLiveUrl);
-  await page.goto(channelLiveUrl, { waitUntil: "domcontentloaded" });
+  const redirectedUrl = page.url();
+  console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
+
+  // Obsługa ekranu zgody (consent.youtube.com)
+  if (redirectedUrl.includes("consent.youtube.com")) {
+    console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
+
+    try {
+      await page.waitForSelector('form[action*="consent"] button[type="submit"]', { timeout: 5000 });
+      await page.click('form[action*="consent"] button[type="submit"]');
+      console.log("✅ [SCRAPER] Kliknięto 'Zgadzam się', czekam na przekierowanie...");
+
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+    } catch (e) {
+      console.error("❌ [SCRAPER] Błąd przy klikaniu w ekran zgody:", e.message);
+      await browser.close();
+      return null;
+    }
+  }
 
   const finalUrl = page.url();
-  console.log("🔀 [SCRAPER] Przekierowano na:", finalUrl);
+  console.log("🎯 [SCRAPER] Finalny URL po przekierowaniach:", finalUrl);
 
-  const match = finalUrl.match(/v=([a-zA-Z0-9_-]{11})/);
-  await browser.close();
-
-  if (match) {
+  const match = finalUrl.match(/v=([\w-]{11})/);
+  if (match && match[1]) {
     const videoId = match[1];
-    console.log("🎯 [SCRAPER] Wykryto VIDEO_ID:", videoId);
+    console.log("🏆 [SCRAPER] Wykryto aktywny stream z ID:", videoId);
+    await browser.close();
     return videoId;
-  } else {
-    console.warn("⚠️ [SCRAPER] Nie znaleziono videoId w przekierowanym URL.");
-    return null;
   }
+
+  console.warn("⚠️ [SCRAPER] Nie znaleziono videoId w przekierowanym URL.");
+  await browser.close();
+  return null;
 }
 
-async function startYouTubeChat(videoId, io = null) {
+async function startYouTubeChat(videoId, io) {
   const exePath = findExecutablePath();
   if (!exePath) return;
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu'
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: "new"
   });
 
   const page = await browser.newPage();
-  const url = `https://www.youtube.com/watch?v=${videoId}`;
-  console.log("🌐 [BOT] Otwieram stronę streama:", url);
+  const streamUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  console.log("🌐 [BOT] Otwieram stronę streama:", streamUrl);
+  await page.goto(streamUrl, { waitUntil: "domcontentloaded" });
 
-  await page.goto(url, { waitUntil: "domcontentloaded" });
-
-  console.log("⌛ [BOT] Czekam na załadowanie iframe z czatem...");
-  await page.waitForSelector("iframe#chatframe", { timeout: 15000 });
-
-  const frame = await page
-    .frames()
-    .find(f => f.url().includes("live_chat"));
-
-  if (!frame) {
-    console.warn("❌ [BOT] Nie znaleziono iframe z czatem.");
+  try {
+    console.log("⌛ [BOT] Czekam na załadowanie iframe z czatem...");
+    await page.waitForSelector("iframe#chatframe", { timeout: 15000 });
+  } catch (e) {
+    console.error("❌ [BOT] Błąd ładowania czatu:", e.message);
     await browser.close();
     return;
   }
 
-  try {
-    await frame.click("#menu #button[aria-label*='Live chat']");
-    console.log("✅ [BOT] Przełączono na Live Chat");
-  } catch (e) {
-    console.log("⚠️ [BOT] Nie udało się przełączyć na Live Chat (może już aktywny).");
+  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
+  if (!chatFrame) {
+    console.error("❌ [BOT] Nie znaleziono iframe z czatem.");
+    await browser.close();
+    return;
   }
 
-  await frame.exposeFunction("emitChat", (text) => {
-    console.log("▶️", text);
+  await chatFrame.exposeFunction("emitChat", (text) => {
+    console.log("▶️ [YouTube Chat]", text);
     if (io) {
       io.emit("chatMessage", {
         source: "YouTube",
@@ -105,26 +113,26 @@ async function startYouTubeChat(videoId, io = null) {
     }
   });
 
-  await frame.evaluate(() => {
-    const chatContainer = document.querySelector("#item-offset");
-    if (!chatContainer) {
-      console.log("❌ [BOT] Nie znaleziono kontenera #item-offset");
+  await chatFrame.evaluate(() => {
+    const container = document.querySelector("#item-offset");
+    if (!container) {
+      console.log("❌ [CHAT] Nie znaleziono kontenera czatu.");
       return;
     }
 
     const observer = new MutationObserver(() => {
       const messages = document.querySelectorAll("yt-live-chat-text-message-renderer");
       messages.forEach(msg => {
-        const name = msg.querySelector("#author-name")?.innerText;
-        const content = msg.querySelector("#message")?.innerText;
-        if (name && content) {
-          window.emitChat(`${name}: ${content}`);
+        const author = msg.querySelector("#author-name")?.innerText;
+        const message = msg.querySelector("#message")?.innerText;
+        if (author && message) {
+          window.emitChat(`${author}: ${message}`);
         }
       });
     });
 
-    observer.observe(chatContainer, { childList: true, subtree: true });
-    console.log("✅ [BOT] Nasłuchiwanie wiadomości rozpoczęte.");
+    observer.observe(container, { childList: true, subtree: true });
+    console.log("✅ [CHAT] Rozpoczęto nasłuch wiadomości z czatu YouTube.");
   });
 }
 
