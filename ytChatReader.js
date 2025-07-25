@@ -17,7 +17,7 @@ function findExecutablePath() {
       return path;
     }
   }
-  console.error("❌ [BROWSER] Nie znaleziono przeglądarki w systemie.");
+  console.error("❌ [BROWSER] Nie znaleziono przeglądarki.");
   return null;
 }
 
@@ -34,26 +34,26 @@ async function getLiveVideoId() {
 
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
+
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  const redirectedUrl = page.url();
-  console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
-
-  // Obsługa ekranu zgody (consent.youtube.com)
-  for (let i = 1; i <= 3; i++) {
-    if (redirectedUrl.includes("consent.youtube.com")) {
-      console.warn(`⚠️ [SCRAPER] Próba ${i}: wykryto ekran zgody na cookies – próbuję kliknąć...`);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const url = page.url();
+    if (url.includes("consent.youtube.com")) {
+      console.warn(`⚠️ [SCRAPER] Próba ${attempt}: wykryto ekran zgody na cookies – próbuję kliknąć...`);
       try {
+        await page.waitForSelector('form[action*="consent"] button', { timeout: 10000 });
         await page.evaluate(() => {
-          const btn = [...document.querySelectorAll("button")].find(el => el.textContent.includes("Accept all"));
+          const btn = Array.from(document.querySelectorAll("button"))
+            .find(b => b.textContent.includes("Accept all"));
           if (btn) btn.click();
         });
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 });
         break;
       } catch (e) {
-        console.error(`❌ [SCRAPER] Błąd przy klikaniu ekran zgody (próba ${i}): ${e.message}`);
-        if (i === 3) {
+        console.error(`❌ [SCRAPER] Błąd przy klikaniu ekran zgody (próba ${attempt}): ${e.message}`);
+        if (attempt === 3) {
           await browser.close();
           return null;
         }
@@ -62,7 +62,7 @@ async function getLiveVideoId() {
   }
 
   const finalUrl = page.url();
-  console.log("🎯 [SCRAPER] Finalny URL po przekierowaniach:", finalUrl);
+  console.log("🎯 [SCRAPER] Finalny URL:", finalUrl);
 
   const match = finalUrl.match(/v=([\w-]{11})/);
   if (match && match[1]) {
@@ -72,7 +72,7 @@ async function getLiveVideoId() {
     return videoId;
   }
 
-  console.warn("⚠️ [SCRAPER] Nie znaleziono videoId w przekierowanym URL.");
+  console.warn("⚠️ [SCRAPER] Nie znaleziono videoId.");
   await browser.close();
   return null;
 }
@@ -90,6 +90,7 @@ async function startYouTubeChat(videoId, io) {
 
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
+
   const streamUrl = `https://www.youtube.com/watch?v=${videoId}`;
   console.log("🌐 [BOT] Otwieram stronę streama:", streamUrl);
   await page.goto(streamUrl, { waitUntil: "domcontentloaded" });
@@ -122,12 +123,7 @@ async function startYouTubeChat(videoId, io) {
   });
 
   await chatFrame.evaluate(() => {
-    const container = document.querySelector("#item-offset");
-    if (!container) {
-      console.log("❌ [CHAT] Nie znaleziono kontenera czatu.");
-      return;
-    }
-
+    const container = document.querySelector("#item-offset") || document;
     const observer = new MutationObserver(() => {
       const messages = document.querySelectorAll("yt-live-chat-text-message-renderer");
       messages.forEach(msg => {
@@ -148,4 +144,3 @@ module.exports = {
   getLiveVideoId,
   startYouTubeChat
 };
-
