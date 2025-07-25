@@ -1,7 +1,7 @@
 const puppeteer = require("puppeteer-core");
 const fs = require("fs");
 
-const CHANNEL_URL = "https://www.youtube.com/@noobsapiens/live";
+const CHANNEL_URL = "https://www.youtube.com/@noobsapiens/live"; // testowy kanał
 
 function findExecutablePath() {
   const paths = [
@@ -73,28 +73,19 @@ async function startYouTubeChat(io) {
     console.log("🤖 [BOT] Czekam na iframe czatu...");
     await page.waitForSelector("iframe#chatframe", { timeout: 15000 });
   } catch (e) {
-    console.error("❌ [BOT] Błąd ładowania iframe:", e.message);
+    console.error("❌ [BOT] Nie znaleziono iframe czatu:", e.message);
     await browser.close();
     return;
   }
 
-  let chatFrame = null;
-  for (let i = 1; i <= 5; i++) {
-    chatFrame = page.frames().find(f => f.url().includes("live_chat"));
-    if (chatFrame) break;
-    console.warn(`⚠️ [BOT] Próba ${i}: iframe czatu niegotowy, czekam...`);
-    await new Promise(r => setTimeout(r, 2000));
-  }
-
+  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
   if (!chatFrame) {
-    console.error("❌ [BOT] Nie znaleziono iframe czatu po 5 próbach.");
+    console.error("❌ [BOT] Nie znaleziono ramki iframe czatu.");
     await browser.close();
     return;
   }
 
   console.log("✅ [BOT] Połączono z iframe czatu. Start nasłuchu...");
-
-  const knownMessages = new Set();
 
   try {
     await chatFrame.exposeFunction("emitChat", (text) => {
@@ -109,7 +100,7 @@ async function startYouTubeChat(io) {
     });
 
     await chatFrame.evaluate(() => {
-      const container = document.querySelector("#item-offset") || document.querySelector("yt-live-chat-item-list-renderer");
+      const container = document.querySelector("yt-live-chat-item-list-renderer");
       if (!container) {
         console.log("❌ [CHAT] Nie znaleziono kontenera wiadomości.");
         return;
@@ -131,7 +122,7 @@ async function startYouTubeChat(io) {
     });
 
   } catch (e) {
-    console.error("❌ [LOOP] Błąd inicjalizacji nasłuchu:", e.message);
+    console.error("❌ [LOOP] Błąd inicjalizacji nasłuchu:", e);
     await browser.close();
   }
 }
