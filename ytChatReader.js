@@ -65,9 +65,25 @@ async function startYouTubeChat(io) {
   const cookies = await page.cookies();
   fs.writeFileSync("./cookies.json", JSON.stringify(cookies, null, 2));
 
-  console.log("🔁 [SCRAPER] Powrót na stronę live...");
-  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
-  console.log("🎯 [SCRAPER] Finalny URL:", page.url());
+  // 🔁 Próby załadowania strony live
+  let success = false;
+  for (let i = 1; i <= 3; i++) {
+    try {
+      console.log(`🔁 [SCRAPER] Powrót na stronę live... (próba ${i})`);
+      await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+      console.log("🎯 [SCRAPER] Finalny URL:", page.url());
+      success = true;
+      break;
+    } catch (err) {
+      console.error(`❌ [SCRAPER] Błąd ładowania (próba ${i}):`, err.message);
+      if (i === 3) {
+        await browser.close();
+        return;
+      }
+    }
+  }
+
+  if (!success) return;
 
   try {
     console.log("🤖 [BOT] Czekam na iframe czatu...");
@@ -78,15 +94,19 @@ async function startYouTubeChat(io) {
     return;
   }
 
+  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
+  if (!chatFrame) {
+    console.error("❌ [BOT] Nie znaleziono iframe czatu.");
+    await browser.close();
+    return;
+  }
+
   console.log("✅ [BOT] Połączono z iframe czatu. Start nasłuchu...");
 
   const knownMessages = new Set();
 
   setInterval(async () => {
     try {
-      const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
-      if (!chatFrame) throw new Error("Iframe czatu odłączony.");
-
       const messages = await chatFrame.evaluate(() => {
         const rendered = document.querySelectorAll("yt-live-chat-text-message-renderer");
         return Array.from(rendered).map(msg => {
