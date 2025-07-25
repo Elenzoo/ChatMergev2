@@ -27,9 +27,10 @@ async function getLiveVideoId() {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: true,
-    timeout: 30000
+    timeout: 30000,
+    userDataDir: "./puppeteer_data"
   });
 
   const page = await browser.newPage();
@@ -37,7 +38,7 @@ async function getLiveVideoId() {
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  let redirectedUrl = page.url();
+  const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
   for (let i = 1; i <= 3; i++) {
@@ -50,6 +51,8 @@ async function getLiveVideoId() {
         });
         await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
         console.log("✅ [SCRAPER] Zgoda zaakceptowana");
+        console.log("🔁 [SCRAPER] Nowy URL po akceptacji:", page.url());
+        await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
         break;
       } catch (e) {
         console.error(`❌ [SCRAPER] Błąd przy klikaniu ekran zgody (próba ${i}): ${e.message}`);
@@ -59,16 +62,6 @@ async function getLiveVideoId() {
         }
       }
     }
-  }
-
-  // 🔁 ponownie otwieramy oryginalny link, już bez ekranu zgody
-  console.log("🔁 [SCRAPER] Nowy URL po akceptacji: ", CHANNEL_URL);
-  try {
-    await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
-  } catch (e) {
-    console.error("⛔ [SCRAPER] Timeout przy ponownym otwieraniu streama:", e.message);
-    await browser.close();
-    return null;
   }
 
   const finalUrl = page.url();
@@ -93,9 +86,10 @@ async function startYouTubeChat(videoId, io) {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: true,
-    timeout: 30000
+    timeout: 30000,
+    userDataDir: "./puppeteer_data"
   });
 
   const page = await browser.newPage();
