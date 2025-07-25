@@ -17,7 +17,7 @@ function findExecutablePath() {
       return path;
     }
   }
-  console.error("❌ [BROWSER] Nie znaleziono przeglądarki.");
+  console.error("❌ [BROWSER] Nie znaleziono przeglądarki w systemie.");
   return null;
 }
 
@@ -27,7 +27,7 @@ async function getLiveVideoId() {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
     headless: true,
     timeout: 30000
   });
@@ -38,22 +38,24 @@ async function getLiveVideoId() {
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const url = page.url();
-    if (url.includes("consent.youtube.com")) {
-      console.warn(`⚠️ [SCRAPER] Próba ${attempt}: wykryto ekran zgody na cookies – próbuję kliknąć...`);
+  let redirectedUrl = page.url();
+  console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
+
+  for (let i = 1; i <= 3; i++) {
+    if (redirectedUrl.includes("consent.youtube.com")) {
+      console.warn(`⚠️ [SCRAPER] Próba ${i}: wykryto ekran zgody na cookies – próbuję kliknąć...`);
       try {
-        await page.waitForSelector('form[action*="consent"] button', { timeout: 10000 });
         await page.evaluate(() => {
-          const btn = Array.from(document.querySelectorAll("button"))
-            .find(b => b.textContent.includes("Accept all"));
+          const btn = [...document.querySelectorAll("button")].find(el => el.textContent.includes("Accept all"));
           if (btn) btn.click();
         });
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+        redirectedUrl = page.url();
+        console.log("🔁 [SCRAPER] Nowy URL po akceptacji:", redirectedUrl);
         break;
       } catch (e) {
-        console.error(`❌ [SCRAPER] Błąd przy klikaniu ekran zgody (próba ${attempt}): ${e.message}`);
-        if (attempt === 3) {
+        console.error(`❌ [SCRAPER] Błąd przy klikaniu ekran zgody (próba ${i}): ${e.message}`);
+        if (i === 3) {
           await browser.close();
           return null;
         }
@@ -61,15 +63,29 @@ async function getLiveVideoId() {
     }
   }
 
-  const finalUrl = page.url();
-  console.log("🎯 [SCRAPER] Finalny URL:", finalUrl);
+  console.log("🎯 [SCRAPER] Finalny URL:", redirectedUrl);
 
-  const match = finalUrl.match(/v=([\w-]{11})/);
-  if (match && match[1]) {
-    const videoId = match[1];
-    console.log("🏆 [SCRAPER] Wykryto aktywny stream z ID:", videoId);
+  // 1. Spróbuj wyciągnąć videoId z URL-a
+  const urlMatch = redirectedUrl.match(/v=([\w-]{11})/);
+  if (urlMatch && urlMatch[1]) {
+    const videoId = urlMatch[1];
+    console.log("🏆 [SCRAPER] Wykryto videoId z URL:", videoId);
     await browser.close();
     return videoId;
+  }
+
+  // 2. Awaryjnie sprawdź <link rel="canonical">
+  try {
+    const canonicalHref = await page.$eval("link[rel='canonical']", el => el.href);
+    const canonicalMatch = canonicalHref.match(/v=([\w-]{11})/);
+    if (canonicalMatch && canonicalMatch[1]) {
+      const videoId = canonicalMatch[1];
+      console.log("🏆 [SCRAPER] Wykryto videoId z canonical link:", videoId);
+      await browser.close();
+      return videoId;
+    }
+  } catch (e) {
+    console.warn("⚠️ [SCRAPER] Nie udało się pobrać <link rel='canonical'>:", e.message);
   }
 
   console.warn("⚠️ [SCRAPER] Nie znaleziono videoId.");
@@ -83,15 +99,15 @@ async function startYouTubeChat(videoId, io) {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
     headless: true,
     timeout: 30000
   });
 
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
-
   const streamUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
   console.log("🌐 [BOT] Otwieram stronę streama:", streamUrl);
   await page.goto(streamUrl, { waitUntil: "domcontentloaded" });
 
@@ -123,7 +139,12 @@ async function startYouTubeChat(videoId, io) {
   });
 
   await chatFrame.evaluate(() => {
-    const container = document.querySelector("#item-offset") || document;
+    const container = document.querySelector("#item-offset");
+    if (!container) {
+      console.log("❌ [CHAT] Nie znaleziono kontenera czatu.");
+      return;
+    }
+
     const observer = new MutationObserver(() => {
       const messages = document.querySelectorAll("yt-live-chat-text-message-renderer");
       messages.forEach(msg => {
