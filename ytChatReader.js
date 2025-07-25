@@ -37,7 +37,7 @@ async function startYouTubeChat(io) {
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  let redirectedUrl = page.url();
+  const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
   for (let i = 1; i <= 3; i++) {
@@ -78,9 +78,16 @@ async function startYouTubeChat(io) {
     return;
   }
 
-  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
+  let chatFrame = null;
+  for (let i = 1; i <= 5; i++) {
+    chatFrame = page.frames().find(f => f.url().includes("live_chat"));
+    if (chatFrame) break;
+    console.warn(`⚠️ [BOT] Próba ${i}: iframe czatu niegotowy, czekam...`);
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
   if (!chatFrame) {
-    console.error("❌ [BOT] Nie znaleziono iframe czatu.");
+    console.error("❌ [BOT] Nie znaleziono iframe czatu po 5 próbach.");
     await browser.close();
     return;
   }
@@ -89,70 +96,44 @@ async function startYouTubeChat(io) {
 
   const knownMessages = new Set();
 
-  let kontenerZnaleziony = false;
-  let observerAttached = false;
-
-  const interval = setInterval(async () => {
-    try {
-      const success = await chatFrame.evaluate(() => {
-        const container = document.querySelector("yt-live-chat-app");
-        if (!container) return false;
-
-        if (!window.__chatObserverAttached__) {
-          const observer = new MutationObserver(() => {
-            const messages = document.querySelectorAll("yt-live-chat-text-message-renderer");
-            messages.forEach(msg => {
-              const author = msg.querySelector("#author-name")?.innerText || "";
-              const text = msg.querySelector("#message")?.innerText || "";
-              const id = msg.getAttribute("id") || Math.random().toString(36).substring(7);
-              if (author && text) {
-                window.dispatchEvent(new CustomEvent("chat-message", {
-                  detail: { id, author, text }
-                }));
-              }
-            });
-          });
-
-          observer.observe(container, { childList: true, subtree: true });
-          window.__chatObserverAttached__ = true;
-          console.log("✅ [CHAT] Observer został podpięty.");
-        }
-
-        return true;
-      });
-
-      if (success && !kontenerZnaleziony) {
-        kontenerZnaleziony = true;
-        console.log("✅ [CHAT] Kontener czatu wykryty i observer podpięty.");
-      }
-
-    } catch (err) {
-      console.error("❌ [LOOP] Błąd czytania wiadomości:", err.message);
-    }
-  }, 3000); // co 3 sekundy
-
-  await chatFrame.exposeFunction("emitChat", (payload) => {
-    const { id, author, text } = payload;
-    if (!knownMessages.has(id)) {
-      knownMessages.add(id);
-      const formatted = `${author}: ${text}`;
-      console.log("💬 [YT Chat]", formatted);
+  try {
+    await chatFrame.exposeFunction("emitChat", (text) => {
+      console.log("💬 [YT Chat]", text);
       if (io) {
         io.emit("chatMessage", {
           source: "YouTube",
-          text: formatted,
+          text,
           timestamp: Date.now()
         });
       }
-    }
-  });
-
-  await chatFrame.evaluate(() => {
-    window.addEventListener("chat-message", e => {
-      const payload = e.detail;
-      if (payload) window.emitChat(payload);
     });
-  });
+
+    await chatFrame.evaluate(() => {
+      const container = document.querySelector("#item-offset") || document.querySelector("yt-live-chat-item-list-renderer");
+      if (!container) {
+        console.log("❌ [CHAT] Nie znaleziono kontenera wiadomości.");
+        return;
+      }
+
+      const observer = new MutationObserver(() => {
+        const messages = document.querySelectorAll("yt-live-chat-text-message-renderer");
+        messages.forEach(msg => {
+          const author = msg.querySelector("#author-name")?.innerText;
+          const message = msg.querySelector("#message")?.innerText;
+          if (author && message) {
+            window.emitChat(`${author}: ${message}`);
+          }
+        });
+      });
+
+      observer.observe(container, { childList: true, subtree: true });
+      console.log("✅ [CHAT] Nasłuchuję wiadomości z czatu.");
+    });
+
+  } catch (e) {
+    console.error("❌ [LOOP] Błąd inicjalizacji nasłuchu:", e.message);
+    await browser.close();
+  }
 }
 
 module.exports = { startYouTubeChat };
