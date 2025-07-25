@@ -2,7 +2,7 @@ const fs = require("fs");
 const axios = require("axios");
 const puppeteer = require("puppeteer-core");
 
-const CHANNEL_URL = "https://www.youtube.com/@zeprezz/live"; // nowy kanał testowy
+const CHANNEL_URL = "https://www.youtube.com/@zeprezz/live";
 
 function findExecutablePath() {
   const paths = [
@@ -13,26 +13,27 @@ function findExecutablePath() {
   ];
   for (const path of paths) {
     if (fs.existsSync(path)) {
-      console.log("✅ Wykryto przeglądarkę:", path);
+      console.log("✅ [PUPPETEER] Wykryto przeglądarkę:", path);
       return path;
     }
   }
-  console.error("❌ Nie znaleziono przeglądarki w systemie.");
+  console.error("❌ [PUPPETEER] Nie znaleziono przeglądarki w systemie.");
   return null;
 }
 
 async function getLiveVideoId() {
+  console.log("🔍 [SCRAPER] Szukam aktywnego streama...");
   try {
     const html = await axios.get(CHANNEL_URL).then(res => res.data);
     const match = html.match(/"videoId":"(.*?)"/);
     if (match) {
       const videoId = match[1];
-      console.log("🎯 ID streama:", videoId);
+      console.log("🎯 [SCRAPER] Znaleziono videoId:", videoId);
       return videoId;
     }
-    console.warn("⚠️ Nie znaleziono aktywnego ID streama na stronie.");
+    console.warn("⚠️ [SCRAPER] Brak aktywnego ID streama.");
   } catch (err) {
-    console.error("❌ Błąd scrapera:", err.message);
+    console.error("❌ [SCRAPER] Błąd pobierania strony kanału:", err.message);
   }
   return null;
 }
@@ -59,41 +60,46 @@ async function startYouTubeChat(videoId) {
   const page = await browser.newPage();
   const chatUrl = `https://www.youtube.com/live_chat?v=${videoId}&is_popout=1`;
 
-  console.log("🌐 Przechodzę do strony czatu:", chatUrl);
+  console.log("🌐 [BOT] Przechodzę do czatu:", chatUrl);
   await page.goto(chatUrl, { waitUntil: "domcontentloaded" });
 
   try {
     await page.screenshot({ path: "chat_screenshot.png" });
-    console.log("📷 Zrzut ekranu strony czatu zapisany.");
+    console.log("📷 [BOT] Zrzut ekranu strony czatu zapisany.");
   } catch (e) {
-    console.warn("⚠️ Nie udało się zapisać screena:", e.message);
+    console.warn("⚠️ [BOT] Nie udało się zapisać screena:", e.message);
   }
 
   await page.exposeFunction("emitChat", (text) => {
-    console.log("▶️", text);
+    console.log("▶️ [CHAT]", text);
   });
 
   await page.evaluate(() => {
-    const chatContainer = document.querySelector("yt-live-chat-renderer #item-offset");
-    if (!chatContainer) {
-      console.log("❌ Nie znaleziono kontenera #item-offset – czat może nie być aktywny.");
+    const target = document.querySelector("yt-live-chat-renderer #item-offset");
+
+    if (!target) {
+      console.warn("❌ [CHAT] Nie znaleziono kontenera #item-offset – czat może być wyłączony.");
       return;
     }
 
-    console.log("✅ Kontener czatu znaleziony – rozpoczynam nasłuch.");
+    console.log("✅ [CHAT] Kontener czatu znaleziony – startuję nasłuch...");
+
+    const seen = new Set();
 
     const observer = new MutationObserver(() => {
       const messages = document.querySelectorAll("#item-offset > yt-live-chat-text-message-renderer");
       messages.forEach(msg => {
         const name = msg.querySelector("#author-name")?.innerText;
         const content = msg.querySelector("#message")?.innerText;
-        if (name && content) {
+        const key = `${name}::${content}`;
+        if (name && content && !seen.has(key)) {
+          seen.add(key);
           window.emitChat(`${name}: ${content}`);
         }
       });
     });
 
-    observer.observe(chatContainer, { childList: true, subtree: true });
+    observer.observe(target, { childList: true, subtree: true });
   });
 }
 
