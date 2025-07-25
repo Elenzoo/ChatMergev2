@@ -1,13 +1,14 @@
 const axios = require("axios");
 
-const API_KEY = "TWÓJ_KLUCZ_API"; // <-- Zamień na własny klucz API
+const API_KEY = "AIzaSyCOR5QRFiHR-hZln9Zb2pHfOnyCANK0Yaw";
 const CHANNEL_USERNAME = "kajma";
 
 let liveChatId = null;
 let nextPageToken = null;
 
 async function getLiveVideoId() {
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&eventType=live&channelId=${await getChannelId()}&key=${API_KEY}`;
+  const channelId = await getChannelId();
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&eventType=live&channelId=${channelId}&key=${API_KEY}`;
   const res = await axios.get(url);
   if (res.data.items.length === 0) {
     console.warn("❌ Brak aktywnego streama.");
@@ -33,33 +34,38 @@ async function startYouTubeChat(io) {
   if (!videoId) return;
 
   liveChatId = await getLiveChatId(videoId);
-  if (!liveChatId) return console.warn("❌ Brak liveChatId.");
+  if (!liveChatId) {
+    console.warn("❌ Nie udało się uzyskać liveChatId.");
+    return;
+  }
 
-  console.log("🎯 Rozpoczynam nasłuch czatu YouTube (kanał: kajma)");
+  console.log("🎯 Nasłuch czatu YouTube rozpoczęty (kanał: @kajma)");
 
   setInterval(async () => {
     try {
-      const url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${liveChatId}&part=snippet,authorDetails&key=${API_KEY}&${nextPageToken ? `pageToken=${nextPageToken}` : ""}`;
+      const url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${liveChatId}&part=snippet,authorDetails&key=${API_KEY}` +
+        (nextPageToken ? `&pageToken=${nextPageToken}` : "");
+
       const res = await axios.get(url);
       nextPageToken = res.data.nextPageToken;
 
       res.data.items.forEach(msg => {
         const user = msg.authorDetails.displayName;
         const text = msg.snippet.displayMessage;
-        const fullMessage = `${user}: ${text}`;
-        console.log("💬 [YT Chat]", fullMessage);
+        const full = `${user}: ${text}`;
+        console.log("💬 [YT Chat]", full);
         if (io) {
           io.emit("chatMessage", {
             source: "YouTube",
-            text: fullMessage,
+            text: full,
             timestamp: Date.now()
           });
         }
       });
     } catch (err) {
-      console.error("❌ Błąd przy pobieraniu wiadomości:", err.message);
+      console.error("❌ Błąd pobierania wiadomości:", err.message);
     }
-  }, 3000); // Co 3 sekundy
+  }, 3000); // co 3 sekundy
 }
 
 module.exports = { startYouTubeChat };
