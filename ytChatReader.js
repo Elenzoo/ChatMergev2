@@ -30,106 +30,77 @@ async function startYouTubeChat(io) {
     headless: true,
     timeout: 30000
   });
-
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
 
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
-  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
+  await page.goto(CHANNEL_URL, { waitUntil: "networkidle2" });
 
-  const redirectedUrl = page.url();
-  console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
-
+  // akceptacja cookies jeśli pojawi się ekran zgody
   for (let i = 1; i <= 3; i++) {
-    if (redirectedUrl.includes("consent.youtube.com")) {
-      console.warn(`⚠️ [SCRAPER] Próba ${i}: ekran zgody – klikam...`);
+    if (page.url().includes("consent.youtube.com")) {
+      console.warn(`⚠️ Próba ${i}: ekran cookies…`);
       try {
-        await page.evaluate(() => {
-          const btn = [...document.querySelectorAll("button")].find(el => el.textContent.includes("Accept all"));
-          if (btn) btn.click();
-        });
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
-        console.log("✅ [SCRAPER] Zgoda zaakceptowana");
+        await page.click('button[aria-label="Accept all"]');
+        await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 10000 });
+        console.log("✅ Zgoda zaakceptowana");
         break;
       } catch (e) {
-        console.error(`❌ [SCRAPER] Błąd akceptacji (próba ${i}):`, e.message);
-        if (i === 3) {
-          await browser.close();
-          return;
-        }
+        console.error(`❌ Błąd akceptacji (próba ${i}):`, e.message);
+        if (i === 3) { await browser.close(); return; }
       }
     }
   }
 
-  console.log("🍪 [SCRAPER] Zapisano cookies.");
+  console.log("🍪 Zapisuję cookies");
   const cookies = await page.cookies();
   fs.writeFileSync("./cookies.json", JSON.stringify(cookies, null, 2));
 
-  console.log("🔁 [SCRAPER] Powrót na stronę live...");
-  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
-  console.log("🎯 [SCRAPER] Finalny URL:", page.url());
+  console.log("🔁 Powrót na live strony...");
+  await page.goto(CHANNEL_URL, { waitUntil: "networkidle2" });
+  console.log("🎯 Finalny URL:", page.url());
 
-  try {
-    console.log("🤖 [BOT] Czekam na iframe czatu...");
-    await page.waitForSelector("iframe#chatframe", { timeout: 15000 });
-  } catch (e) {
-    console.error("❌ [BOT] Błąd ładowania iframe:", e.message);
-    await browser.close();
-    return;
-  }
+  console.log("🤖 Czekam na iframe czatu...");
+  await page.waitForSelector("iframe#chatframe, iframe[src*='live_chat']", { timeout: 20000 });
 
-  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
+  const chatFrame = page
+    .frames()
+    .find(f => f.url().includes("live_chat?v=") || f.url().includes("live_chat"));
+
   if (!chatFrame) {
-    console.error("❌ [BOT] Nie znaleziono iframe czatu.");
+    console.error("❌ Nie znaleziono iframe czatu.");
     await browser.close();
     return;
   }
+  console.log("✅ Połączono z iframe czatu.");
 
-  console.log("✅ [BOT] Połączono z iframe czatu. Start loopa...");
-
-  // Czekamy na renderowane wiadomości
-  try {
-    await chatFrame.waitForSelector("yt-live-chat-text-message-renderer", { timeout: 10000 });
-    console.log("📥 [CHAT] Wiadomości czatu są obecne.");
-  } catch (e) {
-    console.error("❌ [CHAT] Nie znaleziono wiadomości czatu:", e.message);
-    await browser.close();
-    return;
-  }
-
-  const knownMessages = new Set();
-
+  // teraz nasłuchujemy wiadomości
+  const known = new Set();
   setInterval(async () => {
     try {
       const messages = await chatFrame.evaluate(() => {
-        const rendered = document.querySelectorAll("yt-live-chat-text-message-renderer");
-        return Array.from(rendered).map(msg => {
-          const author = msg.querySelector("#author-name")?.innerText || "";
-          const text = msg.querySelector("#message")?.innerText || "";
-          const id = msg.getAttribute("id") || Math.random().toString(36).substring(7);
+        const items = document.querySelectorAll("yt-live-chat-text-message-renderer, yt-live-chat-paid-message-renderer");
+        return Array.from(items).map(el => {
+          const author = el.querySelector("#author-name")?.innerText ?? "";
+          const text = el.querySelector("#message")?.innerText ?? "";
+          const id = el.getAttribute("id") || author + text;
           return { id, author, text };
         });
       });
-
-      messages.forEach(msg => {
-        if (!knownMessages.has(msg.id)) {
-          knownMessages.add(msg.id);
-          const formatted = `${msg.author}: ${msg.text}`;
-          console.log("💬 [YT Chat]", formatted);
-          if (io) {
-            io.emit("chatMessage", {
-              source: "YouTube",
-              text: formatted,
-              timestamp: Date.now()
-            });
-          }
+      messages.forEach(m => {
+        if (!known.has(m.id)) {
+          known.add(m.id);
+          const txt = `${m.author}: ${m.text}`;
+          console.log("💬", txt);
+          io?.emit("chatMessage", { source:"YouTube", text: txt, timestamp: Date.now() });
         }
       });
-
-    } catch (err) {
-      console.error("❌ [LOOP] Błąd czytania wiadomości:", err.message);
+    } catch(e){
+      console.error("❌ Loop error:", e.message);
     }
   }, 2000);
+
+  // nie zamykamy browsera, loop trwa
 }
 
 module.exports = { startYouTubeChat };
