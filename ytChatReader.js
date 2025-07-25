@@ -1,17 +1,49 @@
 const axios = require("axios");
 
-const API_KEY = "AIzaSyCOR5QRFiHR-hZln9Zb2pHfOnyCANK0Yaw"; // Twój klucz API
+const API_KEY = "AIzaSyCOR5QRFiHR-hZln9Zb2pHfOnyCANK0Yaw";
 const CHANNEL_USERNAME = "noobsapiens";
 let nextPageToken = null;
 
-async function getLiveVideoId() {
+function logError(context, err) {
+  console.error(`❌ [${context}]`, err.message);
+  if (err.response?.data) {
+    console.error("📦 [API RESPONSE]", JSON.stringify(err.response.data, null, 2));
+  }
+  if (err.stack) {
+    console.error("🪵 [STACK]", err.stack);
+  }
+}
+
+async function getChannelIdByUsername(username) {
   try {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=UCg_3jZh2zMIcBzU0oN83V0w&type=video&eventType=live&key=${API_KEY}`;
+    const res = await axios.get(`https://www.googleapis.com/youtube/v3/search`, {
+      params: {
+        part: "snippet",
+        q: `@${username}`,
+        type: "channel",
+        maxResults: 1,
+        key: API_KEY
+      }
+    });
+
+    const channel = res.data.items[0];
+    if (!channel) throw new Error("Nie znaleziono kanału po nazwie użytkownika.");
+    return channel.snippet.channelId;
+
+  } catch (err) {
+    logError("getChannelIdByUsername", err);
+    return null;
+  }
+}
+
+async function getLiveVideoId(channelId) {
+  try {
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&eventType=live&key=${API_KEY}`;
     const res = await axios.get(url);
     const video = res.data.items[0];
     return video ? video.id.videoId : null;
   } catch (err) {
-    console.error("❌ [API] Błąd pobierania videoId:", err.message);
+    logError("getLiveVideoId", err);
     return null;
   }
 }
@@ -21,7 +53,7 @@ async function getLiveChatId(videoId) {
     const res = await axios.get(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${API_KEY}`);
     return res.data.items[0]?.liveStreamingDetails?.activeLiveChatId || null;
   } catch (err) {
-    console.error("❌ [API] Błąd pobierania liveChatId:", err.message);
+    logError("getLiveChatId", err);
     return null;
   }
 }
@@ -44,30 +76,38 @@ async function pollChat(chatId, io) {
       const text = msg.snippet.displayMessage;
       const formatted = `${author}: ${text}`;
       console.log("💬 [YT Chat]", formatted);
-      io.emit("chatMessage", {
-        source: "YouTube",
-        text: formatted,
-        timestamp: Date.now()
-      });
+      if (io) {
+        io.emit("chatMessage", {
+          source: "YouTube",
+          text: formatted,
+          timestamp: Date.now()
+        });
+      }
     });
 
     const delay = res.data.pollingIntervalMillis || 5000;
     setTimeout(() => pollChat(chatId, io), delay);
 
   } catch (err) {
-    console.error("❌ [API] Błąd odczytu wiadomości:", err.message);
+    logError("pollChat", err);
     setTimeout(() => pollChat(chatId, io), 10000);
   }
 }
 
 async function startYouTubeChat(io) {
-  const videoId = await getLiveVideoId();
+  console.log("🔍 [BOT] Szukam kanału dla użytkownika @" + CHANNEL_USERNAME);
+  const channelId = await getChannelIdByUsername(CHANNEL_USERNAME);
+  if (!channelId) return console.error("❌ Brak channelId.");
+
+  console.log("🔍 [BOT] Szukam aktywnego streama...");
+  const videoId = await getLiveVideoId(channelId);
   if (!videoId) return console.error("❌ Brak aktywnego streama.");
 
+  console.log("🔍 [BOT] Szukam liveChatId...");
   const chatId = await getLiveChatId(videoId);
-  if (!chatId) return console.error("❌ Brak aktywnego liveChatId.");
+  if (!chatId) return console.error("❌ Brak aktywnego czatu (liveChatId).");
 
-  console.log("✅ [BOT] Rozpoczynam nasłuch czatu...");
+  console.log("✅ [BOT] Rozpoczynam nasłuch czatu na kanale @" + CHANNEL_USERNAME);
   pollChat(chatId, io);
 }
 
