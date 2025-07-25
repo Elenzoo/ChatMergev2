@@ -1,7 +1,7 @@
 const puppeteer = require("puppeteer-core");
 const fs = require("fs");
 
-const CHANNEL_URL = "https://www.youtube.com/@zeprezz/live";
+const CHANNEL_URL = "https://www.youtube.com/@izaklive/live";
 
 function findExecutablePath() {
   const paths = [
@@ -45,7 +45,7 @@ async function startYouTubeChat(io) {
       console.warn(`⚠️ [SCRAPER] Próba ${i}: ekran zgody – klikam...`);
       try {
         await page.evaluate(() => {
-          const btn = [...document.querySelectorAll("button")].find(el => el.textContent.includes("Accept all") || el.textContent.includes("Zgadzam się"));
+          const btn = [...document.querySelectorAll("button")].find(el => el.textContent.includes("Accept all"));
           if (btn) btn.click();
         });
         await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
@@ -60,6 +60,10 @@ async function startYouTubeChat(io) {
       }
     }
   }
+
+  console.log("🍪 [SCRAPER] Zapisano cookies.");
+  const cookies = await page.cookies();
+  fs.writeFileSync("./cookies.json", JSON.stringify(cookies, null, 2));
 
   console.log("🔁 [SCRAPER] Powrót na stronę live...");
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
