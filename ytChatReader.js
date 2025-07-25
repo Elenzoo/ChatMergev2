@@ -2,7 +2,6 @@ const puppeteer = require("puppeteer-core");
 const fs = require("fs");
 
 const CHANNEL_URL = "https://www.youtube.com/@noobsapiens/live";
-let chatFrame = null;
 
 function findExecutablePath() {
   const paths = [
@@ -38,7 +37,7 @@ async function startYouTubeChat(io) {
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  let redirectedUrl = page.url();
+  const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
   for (let i = 1; i <= 3; i++) {
@@ -66,10 +65,21 @@ async function startYouTubeChat(io) {
   const cookies = await page.cookies();
   fs.writeFileSync("./cookies.json", JSON.stringify(cookies, null, 2));
 
-  console.log("🔁 [SCRAPER] Powrót na stronę live...");
-  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
-  redirectedUrl = page.url();
-  console.log("🎯 [SCRAPER] Finalny URL:", redirectedUrl);
+  // === Retry wejścia na stronę /live po cookies ===
+  for (let i = 1; i <= 3; i++) {
+    try {
+      console.log(`🔁 [SCRAPER] Powrót na stronę live... (próba ${i})`);
+      await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+      console.log("🎯 [SCRAPER] Finalny URL:", page.url());
+      break;
+    } catch (err) {
+      console.error(`❌ [SCRAPER] Błąd przy powrocie na /live (próba ${i}):`, err.message);
+      if (i === 3) {
+        await browser.close();
+        return;
+      }
+    }
+  }
 
   try {
     console.log("🤖 [BOT] Czekam na iframe czatu...");
@@ -80,7 +90,7 @@ async function startYouTubeChat(io) {
     return;
   }
 
-  chatFrame = page.frames().find(f => f.url().includes("live_chat"));
+  const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
   if (!chatFrame) {
     console.error("❌ [BOT] Nie znaleziono iframe czatu.");
     await browser.close();
@@ -93,11 +103,6 @@ async function startYouTubeChat(io) {
 
   setInterval(async () => {
     try {
-      if (!chatFrame || chatFrame._detached) {
-        console.warn("⚠️ [LOOP] chatFrame odłączony. Przerywam pętlę.");
-        return;
-      }
-
       const messages = await chatFrame.evaluate(() => {
         const rendered = document.querySelectorAll("yt-live-chat-text-message-renderer");
         return Array.from(rendered).map(msg => {
@@ -109,7 +114,7 @@ async function startYouTubeChat(io) {
       });
 
       messages.forEach(msg => {
-        if (!knownMessages.has(msg.id) && msg.text) {
+        if (!knownMessages.has(msg.id)) {
           knownMessages.add(msg.id);
           const formatted = `${msg.author}: ${msg.text}`;
           console.log("💬 [YT Chat]", formatted);
@@ -122,7 +127,6 @@ async function startYouTubeChat(io) {
           }
         }
       });
-
     } catch (err) {
       console.error("❌ [LOOP] Błąd czytania wiadomości:", err.message);
     }
