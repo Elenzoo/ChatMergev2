@@ -32,31 +32,34 @@ async function getLiveVideoId() {
   });
 
   const page = await browser.newPage();
-
-  // 🏁 Wymuś język angielski
-  await page.setExtraHTTPHeaders({
-    'Accept-Language': 'en-US,en;q=0.9'
-  });
-
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
   const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
+  // 👉 Akceptacja cookiesów
   if (redirectedUrl.includes("consent.youtube.com")) {
     console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
 
     try {
-      const selector = 'form[action*="consent"] button[type="submit"], button[aria-label="Accept all"], #introAgreeButton';
-      await page.waitForSelector(selector, { timeout: 8000 });
-      const button = await page.$(selector);
-      if (button) {
-        console.log("🖱️ [SCRAPER] Klikam 'Accept all'...");
-        await button.click();
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
+      await page.waitForSelector("button", { timeout: 5000 });
+
+      const clicked = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll("button"));
+        const acceptBtn = buttons.find(btn => btn.textContent?.toLowerCase().includes("accept all"));
+        if (acceptBtn) {
+          acceptBtn.click();
+          return true;
+        }
+        return false;
+      });
+
+      if (clicked) {
+        console.log("🖱️ [SCRAPER] Kliknięto 'Accept all', czekam na przejście...");
+        await page.waitForFunction(() => !location.hostname.includes("consent"), { timeout: 10000 });
       } else {
-        console.warn("⚠️ [SCRAPER] Nie znaleziono przycisku zgody.");
+        console.warn("⚠️ [SCRAPER] Nie znaleziono przycisku 'Accept all'.");
       }
     } catch (e) {
       console.error("❌ [SCRAPER] Błąd przy klikaniu w ekran zgody:", e.message);
@@ -92,12 +95,6 @@ async function startYouTubeChat(videoId, io) {
   });
 
   const page = await browser.newPage();
-
-  // 🏁 Ustaw język angielski również tutaj (opcjonalnie)
-  await page.setExtraHTTPHeaders({
-    'Accept-Language': 'en-US,en;q=0.9'
-  });
-
   const streamUrl = `https://www.youtube.com/watch?v=${videoId}`;
   console.log("🌐 [BOT] Otwieram stronę streama:", streamUrl);
   await page.goto(streamUrl, { waitUntil: "domcontentloaded" });
