@@ -1,6 +1,5 @@
 FROM node:18-slim
 
-# Instalacja zależności systemowych wymaganych przez Puppeteera
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     fonts-liberation \
@@ -19,23 +18,14 @@ RUN apt-get update && apt-get install -y \
     libgbm1 \
     libgtk-3-0 \
     wget \
+    chromium \
     --no-install-recommends && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Zmienne środowiskowe dla Puppeteera
-ENV PUPPETEER_SKIP_DOWNLOAD=false
-ENV PUPPETEER_EXECUTABLE_PATH=""
-ENV NODE_ENV=production
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Ustawiamy katalog roboczy
 WORKDIR /app
-
-# Kopiujemy pliki projektu
 COPY . .
-
-# Instalujemy zależności NPM (w tym Puppeteer)
 RUN npm install
-
-# Uruchamiamy aplikację
 CMD ["node", "server.js"]
