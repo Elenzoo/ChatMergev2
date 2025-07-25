@@ -43,13 +43,8 @@ async function getLiveVideoId() {
     console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
 
     try {
-      await page.waitForTimeout(1000); // Na wszelki wypadek
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Debug: pokaż fragment HTML
-      const html = await page.content();
-      console.log("🔍 [DEBUG] Fragment strony (pierwsze 500 znaków):", html.slice(0, 500));
-
-      // XPath klikający "Accept all" (niezależnie od wersji językowej)
       const [acceptBtn] = await page.$x(
         `//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept all')]`
       );
@@ -73,7 +68,7 @@ async function getLiveVideoId() {
   }
 
   const finalUrl = page.url();
-  console.log("🎯 [SCRAPER] Finalny URL:", finalUrl);
+  console.log("🎯 [SCRAPER] Finalny URL po przekierowaniach:", finalUrl);
 
   const match = finalUrl.match(/v=([\w-]{11})/);
   if (match && match[1]) {
@@ -83,7 +78,7 @@ async function getLiveVideoId() {
     return videoId;
   }
 
-  console.warn("⚠️ [SCRAPER] Nie znaleziono videoId w URL.");
+  console.warn("📭 [SCRAPER] Nie znaleziono videoId w URL.");
   await browser.close();
   return null;
 }
