@@ -3,6 +3,7 @@ const fs = require("fs");
 
 const CHANNEL_HANDLE = "@zeprezz";
 const CHANNEL_URL = `https://www.youtube.com/${CHANNEL_HANDLE}/live`;
+const COOKIES_PATH = "./cookies.json";
 
 function findExecutablePath() {
   const paths = [
@@ -29,16 +30,22 @@ async function getLiveVideoId() {
     executablePath: exePath,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: true,
-    timeout: 30000,
-    userDataDir: "./puppeteer_data"
+    timeout: 30000
   });
 
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
+
+  if (fs.existsSync(COOKIES_PATH)) {
+    const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
+    await page.setCookie(...cookies);
+    console.log("🍪 [SCRAPER] Załadowano cookies z pliku.");
+  }
+
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  const redirectedUrl = page.url();
+  let redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
   for (let i = 1; i <= 3; i++) {
@@ -50,9 +57,6 @@ async function getLiveVideoId() {
           if (btn) btn.click();
         });
         await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
-        console.log("✅ [SCRAPER] Zgoda zaakceptowana");
-        console.log("🔁 [SCRAPER] Nowy URL po akceptacji:", page.url());
-        await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
         break;
       } catch (e) {
         console.error(`❌ [SCRAPER] Błąd przy klikaniu ekran zgody (próba ${i}): ${e.message}`);
@@ -62,7 +66,17 @@ async function getLiveVideoId() {
         }
       }
     }
+    redirectedUrl = page.url();
   }
+
+  console.log("✅ [SCRAPER] Zgoda zaakceptowana");
+
+  const cookies = await page.cookies();
+  fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+  console.log("💾 [SCRAPER] Zapisano cookies do pliku.");
+
+  console.log("🔁 [SCRAPER] Nowy URL po akceptacji:", CHANNEL_URL);
+  await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
   const finalUrl = page.url();
   console.log("🎯 [SCRAPER] Finalny URL:", finalUrl);
@@ -88,8 +102,7 @@ async function startYouTubeChat(videoId, io) {
     executablePath: exePath,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: true,
-    timeout: 30000,
-    userDataDir: "./puppeteer_data"
+    timeout: 30000
   });
 
   const page = await browser.newPage();
