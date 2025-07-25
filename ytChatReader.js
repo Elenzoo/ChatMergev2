@@ -38,7 +38,6 @@ async function getLiveVideoId() {
   const redirectedUrl = page.url();
   console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
 
-  // Obsługa ekranu zgody (consent.youtube.com)
   if (redirectedUrl.includes("consent.youtube.com")) {
     console.warn("⚠️ [SCRAPER] Wykryto ekran zgody na cookies – próbuję kliknąć...");
 
@@ -46,7 +45,7 @@ async function getLiveVideoId() {
       await Promise.race([
         page.waitForSelector('form[action*="consent"] button[type="submit"]', { timeout: 5000 }),
         page.waitForSelector('button[aria-label="Zgadzam się"]', { timeout: 5000 }),
-        page.waitForSelector('#introAgreeButton', { timeout: 5000 }) // stary typ
+        page.waitForSelector('#introAgreeButton', { timeout: 5000 }) // starszy typ
       ]);
 
       const buttons = await page.$$('form[action*="consent"] button[type="submit"], button[aria-label="Zgadzam się"], #introAgreeButton');
