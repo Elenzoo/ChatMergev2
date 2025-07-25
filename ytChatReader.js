@@ -3,7 +3,7 @@ const axios = require("axios");
 const puppeteer = require("puppeteer-core");
 const glob = require("glob");
 
-const CHANNEL_URL = "https://www.youtube.com/@zeprezz/live"; // <--- TU PODMIANA
+const CHANNEL_URL = "https://youtube.com/@kitben/live"; // <--- TU PODMIANA
 
 function findExecutablePath() {
   const paths = [
