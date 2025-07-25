@@ -1,9 +1,8 @@
 const fs = require("fs");
 const axios = require("axios");
 const puppeteer = require("puppeteer-core");
-const glob = require("glob");
 
-const CHANNEL_URL = "https://youtube.com/@kitben/live"; // <--- TU PODMIANA
+const CHANNEL_URL = "https://www.youtube.com/@zeprezz/live"; // nowy kanał testowy
 
 function findExecutablePath() {
   const paths = [
@@ -12,14 +11,12 @@ function findExecutablePath() {
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser"
   ];
-
   for (const path of paths) {
     if (fs.existsSync(path)) {
       console.log("✅ Wykryto przeglądarkę:", path);
       return path;
     }
   }
-
   console.error("❌ Nie znaleziono przeglądarki w systemie.");
   return null;
 }
@@ -33,10 +30,10 @@ async function getLiveVideoId() {
       console.log("🎯 ID streama:", videoId);
       return videoId;
     }
+    console.warn("⚠️ Nie znaleziono aktywnego ID streama na stronie.");
   } catch (err) {
     console.error("❌ Błąd scrapera:", err.message);
   }
-
   return null;
 }
 
@@ -60,15 +57,31 @@ async function startYouTubeChat(videoId) {
   });
 
   const page = await browser.newPage();
-  await page.goto(`https://www.youtube.com/watch?v=${videoId}`, {
-    waitUntil: "domcontentloaded"
-  });
+  const chatUrl = `https://www.youtube.com/live_chat?v=${videoId}&is_popout=1`;
+
+  console.log("🌐 Przechodzę do strony czatu:", chatUrl);
+  await page.goto(chatUrl, { waitUntil: "domcontentloaded" });
+
+  try {
+    await page.screenshot({ path: "chat_screenshot.png" });
+    console.log("📷 Zrzut ekranu strony czatu zapisany.");
+  } catch (e) {
+    console.warn("⚠️ Nie udało się zapisać screena:", e.message);
+  }
 
   await page.exposeFunction("emitChat", (text) => {
     console.log("▶️", text);
   });
 
   await page.evaluate(() => {
+    const chatContainer = document.querySelector("yt-live-chat-renderer #item-offset");
+    if (!chatContainer) {
+      console.log("❌ Nie znaleziono kontenera #item-offset – czat może nie być aktywny.");
+      return;
+    }
+
+    console.log("✅ Kontener czatu znaleziony – rozpoczynam nasłuch.");
+
     const observer = new MutationObserver(() => {
       const messages = document.querySelectorAll("#item-offset > yt-live-chat-text-message-renderer");
       messages.forEach(msg => {
@@ -80,10 +93,7 @@ async function startYouTubeChat(videoId) {
       });
     });
 
-    const container = document.querySelector("#item-offset");
-    if (container) {
-      observer.observe(container, { childList: true, subtree: true });
-    }
+    observer.observe(chatContainer, { childList: true, subtree: true });
   });
 }
 
