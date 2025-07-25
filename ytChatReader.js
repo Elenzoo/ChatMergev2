@@ -85,13 +85,14 @@ async function startYouTubeChat(io) {
     return;
   }
 
-  console.log("✅ [BOT] Połączono z iframe czatu. Czekam na kontener czatu...");
+  console.log("✅ [BOT] Połączono z iframe czatu. Start loopa...");
 
+  // Czekamy na renderowane wiadomości
   try {
-    await chatFrame.waitForSelector("#item-offset", { timeout: 10000 });
-    console.log("📥 [CHAT] Kontener czatu załadowany.");
+    await chatFrame.waitForSelector("yt-live-chat-text-message-renderer", { timeout: 10000 });
+    console.log("📥 [CHAT] Wiadomości czatu są obecne.");
   } catch (e) {
-    console.error("❌ [CHAT] Nie znaleziono kontenera wiadomości:", e.message);
+    console.error("❌ [CHAT] Nie znaleziono wiadomości czatu:", e.message);
     await browser.close();
     return;
   }
@@ -101,20 +102,19 @@ async function startYouTubeChat(io) {
   setInterval(async () => {
     try {
       const messages = await chatFrame.evaluate(() => {
-        return Array.from(document.querySelectorAll("yt-live-chat-text-message-renderer"))
-          .map(el => {
-            const id = el.getAttribute("id") || Math.random().toString(36).substring(2, 10);
-            const author = el.querySelector("#author-name")?.innerText?.trim() || "";
-            const message = el.querySelector("#message")?.innerText?.trim() || "";
-            return { id, author, message };
-          })
-          .filter(m => m.author && m.message);
+        const rendered = document.querySelectorAll("yt-live-chat-text-message-renderer");
+        return Array.from(rendered).map(msg => {
+          const author = msg.querySelector("#author-name")?.innerText || "";
+          const text = msg.querySelector("#message")?.innerText || "";
+          const id = msg.getAttribute("id") || Math.random().toString(36).substring(7);
+          return { id, author, text };
+        });
       });
 
       messages.forEach(msg => {
         if (!knownMessages.has(msg.id)) {
           knownMessages.add(msg.id);
-          const formatted = `${msg.author}: ${msg.message}`;
+          const formatted = `${msg.author}: ${msg.text}`;
           console.log("💬 [YT Chat]", formatted);
           if (io) {
             io.emit("chatMessage", {
