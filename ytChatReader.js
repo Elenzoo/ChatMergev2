@@ -2,7 +2,6 @@ const puppeteer = require("puppeteer-core");
 const fs = require("fs");
 
 const CHANNEL_URL = "https://www.youtube.com/@zeprezz/live";
-const COOKIES_PATH = "./cookies.json";
 
 function findExecutablePath() {
   const paths = [
@@ -17,7 +16,7 @@ function findExecutablePath() {
       return path;
     }
   }
-  console.error("❌ [BROWSER] Nie znaleziono przeglądarki w systemie.");
+  console.error("❌ [BROWSER] Nie znaleziono przeglądarki.");
   return null;
 }
 
@@ -27,28 +26,23 @@ async function startYouTubeChat(io) {
 
   const browser = await puppeteer.launch({
     executablePath: exePath,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    headless: true
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    headless: true,
+    timeout: 30000
   });
 
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(30000);
 
-  // Załaduj cookies jeśli istnieją
-  if (fs.existsSync(COOKIES_PATH)) {
-    const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf-8"));
-    await page.setCookie(...cookies);
-    console.log("🍪 [SCRAPER] Załadowano cookies z pliku.");
-  }
-
   console.log("🔗 [SCRAPER] Otwieram URL:", CHANNEL_URL);
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
 
-  // Ekran zgody
+  const redirectedUrl = page.url();
+  console.log("🔁 [SCRAPER] Przekierowano na:", redirectedUrl);
+
   for (let i = 1; i <= 3; i++) {
-    const url = page.url();
-    if (url.includes("consent.youtube.com")) {
-      console.warn(`⚠️ [SCRAPER] Próba ${i}: wykryto ekran zgody na cookies – próbuję kliknąć...`);
+    if (redirectedUrl.includes("consent.youtube.com")) {
+      console.warn(`⚠️ [SCRAPER] Próba ${i}: ekran zgody – klikam...`);
       try {
         await page.evaluate(() => {
           const btn = [...document.querySelectorAll("button")].find(el => el.textContent.includes("Accept all"));
@@ -56,8 +50,9 @@ async function startYouTubeChat(io) {
         });
         await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 });
         console.log("✅ [SCRAPER] Zgoda zaakceptowana");
+        break;
       } catch (e) {
-        console.error(`❌ [SCRAPER] Błąd przy akceptacji (próba ${i}): ${e.message}`);
+        console.error(`❌ [SCRAPER] Błąd akceptacji (próba ${i}):`, e.message);
         if (i === 3) {
           await browser.close();
           return;
@@ -66,66 +61,66 @@ async function startYouTubeChat(io) {
     }
   }
 
-  // Zapisz cookies
+  console.log("🍪 [SCRAPER] Zapisano cookies.");
   const cookies = await page.cookies();
-  fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies));
-  console.log("🍪 [SCRAPER] Zapisano cookies do pliku.");
+  fs.writeFileSync("./cookies.json", JSON.stringify(cookies, null, 2));
 
-  // Powrót na stronę streama po zgodzie
   console.log("🔁 [SCRAPER] Powrót na stronę live...");
   await page.goto(CHANNEL_URL, { waitUntil: "domcontentloaded" });
   console.log("🎯 [SCRAPER] Finalny URL:", page.url());
 
-  console.log("⌛ [BOT] Czekam na iframe czatu...");
   try {
+    console.log("🤖 [BOT] Czekam na iframe czatu...");
     await page.waitForSelector("iframe#chatframe", { timeout: 15000 });
   } catch (e) {
-    console.error("❌ [BOT] Nie znaleziono iframe czatu:", e.message);
+    console.error("❌ [BOT] Błąd ładowania iframe:", e.message);
     await browser.close();
     return;
   }
 
   const chatFrame = page.frames().find(f => f.url().includes("live_chat"));
   if (!chatFrame) {
-    console.error("❌ [BOT] Nie znaleziono frame z czatem.");
+    console.error("❌ [BOT] Nie znaleziono iframe czatu.");
     await browser.close();
     return;
   }
 
-  await chatFrame.exposeFunction("emitChat", (text) => {
-    console.log("▶️ [YouTube Chat]", text);
-    if (io) {
-      io.emit("chatMessage", {
-        source: "YouTube",
-        text,
-        timestamp: Date.now()
+  console.log("✅ [BOT] Połączono z iframe czatu. Start loopa...");
+
+  const knownMessages = new Set();
+
+  setInterval(async () => {
+    try {
+      const messages = await chatFrame.evaluate(() => {
+        const rendered = document.querySelectorAll("yt-live-chat-text-message-renderer");
+        return Array.from(rendered).map(msg => {
+          const author = msg.querySelector("#author-name")?.innerText || "";
+          const text = msg.querySelector("#message")?.innerText || "";
+          const id = msg.getAttribute("id") || Math.random().toString(36).substring(7);
+          return { id, author, text };
+        });
       });
-    }
-  });
 
-  await chatFrame.evaluate(() => {
-    const container = document.querySelector("#item-offset");
-    if (!container) {
-      console.log("❌ [CHAT] Nie znaleziono kontenera czatu.");
-      return;
-    }
-
-    const observer = new MutationObserver(() => {
-      const messages = document.querySelectorAll("yt-live-chat-text-message-renderer");
       messages.forEach(msg => {
-        const author = msg.querySelector("#author-name")?.innerText;
-        const message = msg.querySelector("#message")?.innerText;
-        if (author && message) {
-          window.emitChat(`${author}: ${message}`);
+        if (!knownMessages.has(msg.id)) {
+          knownMessages.add(msg.id);
+          const formatted = `${msg.author}: ${msg.text}`;
+          console.log("💬 [YT Chat]", formatted);
+          if (io) {
+            io.emit("chatMessage", {
+              source: "YouTube",
+              text: formatted,
+              timestamp: Date.now()
+            });
+          }
         }
       });
-    });
 
-    observer.observe(container, { childList: true, subtree: true });
-    console.log("✅ [CHAT] Rozpoczęto nasłuch wiadomości z czatu YouTube.");
-  });
+    } catch (err) {
+      console.error("❌ [LOOP] Błąd czytania wiadomości:", err.message);
+    }
+  }, 2000); // co 2 sekundy
+
 }
 
-module.exports = {
-  startYouTubeChat
-};
+module.exports = { startYouTubeChat };
